@@ -3,7 +3,12 @@
 A simple, kid-friendly beat maker for an Akai MPK Mini MK3 (works without it too).
 One HTML file, no install, no internet needed.
 
-## Run (Linux Mint)
+## Play online
+**https://ykolodyazhny.github.io/mk3proj/** — open it in Chrome, plug in the MPK, click the big button. That's it, nothing to install. Share that link with anyone.
+
+(One-time setup for the repo owner: merge to `main`, then Settings → Pages → Source: **GitHub Actions**.)
+
+## Run offline (Linux Mint)
 Plug in the MPK, then:
 
     ./run.sh
