@@ -48,6 +48,11 @@ h2{margin:0 0 8px;font-size:15px;color:var(--dim);font-weight:normal;letter-spac
 .roll .row{margin:2px 0}
 .roll .lab{width:150px;flex:none;color:var(--dim);font-size:13px;text-align:right;padding-right:8px}
 .roll .step{height:24px;border-radius:6px}
+.kpage{opacity:.55;margin-bottom:10px;border-radius:14px;padding:6px;border:2px solid transparent}
+.kpage.active{opacity:1;border-color:var(--accent)}
+.kpage h3{margin:0 0 6px;font-size:14px}
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#000c;border:2px solid var(--accent);padding:10px 22px;border-radius:18px;font-size:22px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:5}
+#toast.show{opacity:1}
 .knobs{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
 .knob{background:var(--panel2);border-radius:12px;padding:8px 10px}
 .knob b{display:block;font-size:13px}
@@ -67,6 +72,7 @@ kbd{background:var(--panel2);padding:1px 6px;border-radius:5px}
 </head>
 <body>
 
+<div id="toast"></div>
 <div id="start">
   <h1>Beat<span>Box</span> 🥁</h1>
   <p>Make beats, play melodies, record your own sounds!<br>Plug in your MPK mini and press the button.</p>
@@ -102,8 +108,8 @@ kbd{background:var(--panel2);padding:1px 6px;border-radius:5px}
   </section>
 
   <section>
-    <h2>KNOBS (MPK knobs K1–K8 move these too)</h2>
-    <div class="knobs" id="knobs"></div>
+    <h2>KNOBS — the MPK's K1–K8 control the lit-up row. <button id="pagebtn" class="mini">Switch knob page</button></h2>
+    <div id="knobs"></div>
   </section>
 
   <section>
@@ -112,7 +118,7 @@ kbd{background:var(--panel2);padding:1px 6px;border-radius:5px}
 
   <section class="help">
     <b>Your own sounds:</b> 📁 loads a sound file onto that drum (or drag a file onto the row). Hold 🎤 to record from the microphone. ↺ puts the original back.<br>
-    <b>No keyboard plugged in?</b> Pads: <kbd>1</kbd>–<kbd>8</kbd> · Piano: <kbd>A S D F G H J K</kbd> (white) <kbd>W E T Y U</kbd> (black) · <kbd>Space</kbd> play/stop · <kbd>Z</kbd>/<kbd>X</kbd> octave.<br>
+    <b>No keyboard plugged in?</b> Pads: <kbd>1</kbd>–<kbd>8</kbd> · Piano: <kbd>A S D F G H J K</kbd> (white) <kbd>W E T Y U</kbd> (black) · <kbd>Space</kbd> play/stop · <kbd>Z</kbd>/<kbd>X</kbd> octave · <kbd>P</kbd> knob page.<br>
     <b>MPK joystick</b> bends the melody notes. <b>Rec</b> starts the loop and records pads &amp; keys right on the beat.
   </section>
 </main>
@@ -144,11 +150,18 @@ const SCALES={maj:[0,2,4,7,9], min:[0,3,5,7,10]};
 const ROLL_ROWS=10;                      // 2 octaves of 5 notes
 
 /* ============ state ============ */
-const params={tempo:.35,volume:.8,filter:.7,swing:0,drums:.85,echo:.15,synth:.7,release:.3};
-const KNOBS=[ // CC 70..77
-  ["tempo","🐢 Speed 🐇","K1"],["volume","🔊 Main volume","K2"],["filter","🔆 Brightness","K3"],
-  ["swing","🎶 Swing","K4"],["drums","🥁 Drum volume","K5"],["echo","🏔 Echo","K6"],
-  ["synth","🎹 Melody volume","K7"],["release","〰 Note tail","K8"]];
+const params={tempo:.35,volume:.8,dj:.5,echo:.15,reverb:.12,dpitch:.5,crush:0,chop:0,
+  swing:0,drums:.85,synth:.7,bright:.7,release:.3,mpitch:.5,res:.2,echolen:.4};
+// two pages of 8 knobs; the MPK's K1-K8 (CC 70-77) control the active page
+const PAGES=[
+ {name:"🎛 Fun FX",knobs:[
+  ["tempo","🐢 Speed 🐇"],["volume","🔊 Main volume"],["dj","🌀 DJ filter (← low · high →)"],["echo","🏔 Echo"],
+  ["reverb","🛁 Reverb"],["dpitch","🎵 Drum pitch"],["crush","👾 Robot / crunch"],["chop","🔪 Chopper"]]},
+ {name:"🎚 Mixer",knobs:[
+  ["swing","🎶 Swing"],["drums","🥁 Drum volume"],["synth","🎹 Melody volume"],["bright","🔆 Melody brightness"],
+  ["release","〰 Note tail"],["mpitch","🎼 Melody pitch"],["res","✨ Filter squeal"],["echolen","🏔 Echo length"]]},
+];
+let page=0;
 const emptyPat=()=>({d:DRUMS.map(()=>Array(STEPS).fill(0)), m:Array.from({length:STEPS},()=>[])});
 let S={pats:[emptyPat(),emptyPat(),emptyPat(),emptyPat()],cur:0,preset:"Bubble",key:0,scale:"maj"};
 let pat=()=>S.pats[S.cur];
@@ -156,7 +169,7 @@ let octave=0;                            // computer-keyboard octave shift
 let playing=false, recording=false;
 
 /* ============ audio graph ============ */
-let ctx, master, drumBus, synthBus, echoSend, echoDelay, analyser, recDest, noiseBuf;
+let ctx, master, drumBus, synthBus, echoSend, echoDelay, echoFb, analyser, recDest, noiseBuf, dj, chop, chopLfo, chopDepth, verbSend, crushNode;
 const samples=Array(DRUMS.length).fill(null);   // AudioBuffers
 function initAudio(){
   ctx=new (window.AudioContext||window.webkitAudioContext)({latencyHint:"interactive"});
@@ -164,39 +177,82 @@ function initAudio(){
   const comp=ctx.createDynamicsCompressor();
   analyser=ctx.createAnalyser(); analyser.fftSize=128;
   recDest=ctx.createMediaStreamDestination();
-  master.connect(comp); comp.connect(ctx.destination); comp.connect(recDest); comp.connect(analyser);
+  dj=ctx.createBiquadFilter(); chop=ctx.createGain();
+  chopLfo=ctx.createOscillator(); chopLfo.type="triangle"; chopDepth=ctx.createGain(); chopLfo.connect(chopDepth); chopDepth.connect(chop.gain); chopLfo.start();
+  master.connect(dj); dj.connect(chop); chop.connect(comp);
+  comp.connect(ctx.destination); comp.connect(recDest); comp.connect(analyser);
   drumBus=ctx.createGain(); synthBus=ctx.createGain();
   drumBus.connect(master); synthBus.connect(master);
   echoSend=ctx.createGain(); echoDelay=ctx.createDelay(2);
-  const fb=ctx.createGain(); fb.gain.value=.4;
+  const fb=echoFb=ctx.createGain(); fb.gain.value=.4;
   const lp=ctx.createBiquadFilter(); lp.frequency.value=2800;
   drumBus.connect(echoSend); synthBus.connect(echoSend);
   echoSend.connect(echoDelay); echoDelay.connect(lp); lp.connect(fb); fb.connect(echoDelay); lp.connect(master);
+  // reverb: generated decaying-noise room
+  const verb=ctx.createConvolver(), ir=ctx.createBuffer(2,ctx.sampleRate*2.2,ctx.sampleRate);
+  for(let c=0;c<2;c++){const d=ir.getChannelData(c); for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,3);}
+  verb.buffer=ir; verbSend=ctx.createGain(); drumBus.connect(verbSend); synthBus.connect(verbSend); verbSend.connect(verb); verb.connect(master);
   noiseBuf=ctx.createBuffer(1,ctx.sampleRate,ctx.sampleRate);
   const nd=noiseBuf.getChannelData(0); for(let i=0;i<nd.length;i++) nd[i]=Math.random()*2-1;
   applyParams();
+}
+// bit-crusher / sample-rate reducer as an AudioWorklet (skipped quietly if unsupported)
+async function initCrush(){
+  try{
+    const code=`class C extends AudioWorkletProcessor{
+      static get parameterDescriptors(){return [{name:"bits",defaultValue:16,minValue:2,maxValue:16},{name:"rate",defaultValue:1,minValue:1,maxValue:60}]}
+      constructor(){super();this.h=[0,0];this.c=[0,0];}
+      process(i,o,p){const a=i[0],b=o[0]; if(!a||!a.length) return true;
+        const bits=p.bits[0],rate=p.rate[0],q=Math.pow(2,bits-1),pass=bits>=15.9&&rate<=1.01;
+        for(let ch=0;ch<b.length;ch++){const x=a[Math.min(ch,a.length-1)],y=b[ch];
+          for(let n=0;n<y.length;n++){ if(pass){y[n]=x[n];continue;}
+            if(this.c[ch]<=0){this.h[ch]=Math.round(x[n]*q)/q;this.c[ch]+=rate;} this.c[ch]-=1; y[n]=this.h[ch]; } }
+        return true;}} registerProcessor("crush",C);`;
+    const url=URL.createObjectURL(new Blob([code],{type:"application/javascript"}));
+    await ctx.audioWorklet.addModule(url);
+    crushNode=new AudioWorkletNode(ctx,"crush",{outputChannelCount:[2],channelCount:2,channelCountMode:"explicit"});
+    dj.disconnect(); dj.connect(crushNode); crushNode.connect(chop); applyParams();
+  }catch(e){ crushNode=null; }
 }
 const bpm=()=>Math.round(60+params.tempo*140);   // 60..200
 const stepDur=()=>60/bpm()/4;
 function applyParams(){
   if(!ctx) return;
-  const t=ctx.currentTime;
-  master.gain.setTargetAtTime(params.volume,t,.02);
-  drumBus.gain.setTargetAtTime(params.drums,t,.02);
-  synthBus.gain.setTargetAtTime(params.synth,t,.02);
-  echoSend.gain.setTargetAtTime(params.echo*.8,t,.02);
+  const t=ctx.currentTime, P=params;
+  master.gain.setTargetAtTime(P.volume,t,.02);
+  drumBus.gain.setTargetAtTime(P.drums,t,.02);
+  synthBus.gain.setTargetAtTime(P.synth,t,.02);
+  echoSend.gain.setTargetAtTime(P.echo*.8,t,.02);
+  echoFb.gain.setTargetAtTime(.15+P.echolen*.6,t,.05);
   echoDelay.delayTime.setTargetAtTime(Math.min(1.9,60/bpm()*.75),t,.05);
+  verbSend.gain.setTargetAtTime(P.reverb*1.2,t,.05);
+  // DJ filter: left of centre = low-pass (muffled), right = high-pass (thin)
+  dj.Q.setTargetAtTime(.7+P.res*14,t,.03);
+  const x=(P.dj-.5)*2;
+  if(Math.abs(x)<.04){ dj.type="lowpass"; dj.frequency.setTargetAtTime(20000,t,.03); dj.Q.setTargetAtTime(.7,t,.03); }
+  else if(x<0){ dj.type="lowpass"; dj.frequency.setTargetAtTime(20000*Math.pow(.008,-x),t,.03); }
+  else { dj.type="highpass"; dj.frequency.setTargetAtTime(20*Math.pow(400,x),t,.03); }
+  // crusher
+  if(crushNode){ const c=P.crush<.03?0:P.crush;
+    crushNode.parameters.get("bits").setTargetAtTime(16-c*12,t,.03);
+    crushNode.parameters.get("rate").setTargetAtTime(1+c*c*30,t,.03); }
+  // chopper: tempo-synced (8th note) volume wobble
+  const depth=P.chop<.03?0:P.chop*.5;
+  chop.gain.setTargetAtTime(1-depth,t,.03); chopDepth.gain.setTargetAtTime(depth,t,.03);
+  chopLfo.frequency.setTargetAtTime(bpm()/60*2,t,.03);
 }
-const cutoff=()=>200*Math.pow(40,params.filter);          // 200..8000 Hz
+const cutoff=()=>200*Math.pow(40,params.bright);
+const semis=v=>Math.round((v-.5)*24);   // knob -> -12..+12 semitones, 0 in the middle          // 200..8000 Hz
 
 /* ============ drum synthesis ============ */
-function noise(t,dur,type,freq,q,peak,decay){
+let pm=1;   // drum pitch multiplier
+function noise(t,dur,type,freq,q,peak,decay){ freq*=pm;
   const s=ctx.createBufferSource(); s.buffer=noiseBuf; s.loop=true;
   const f=ctx.createBiquadFilter(); f.type=type; f.frequency.value=freq; f.Q.value=q||1;
   const g=ctx.createGain(); g.gain.setValueAtTime(peak,t); g.gain.exponentialRampToValueAtTime(.001,t+decay);
   s.connect(f); f.connect(g); g.connect(drumBus); s.start(t); s.stop(t+dur);
 }
-function tone(t,type,f0,f1,dur,peak,dest){
+function tone(t,type,f0,f1,dur,peak,dest){ f0*=pm; if(f1) f1*=pm;
   const o=ctx.createOscillator(), g=ctx.createGain(); o.type=type;
   o.frequency.setValueAtTime(f0,t); if(f1) o.frequency.exponentialRampToValueAtTime(f1,t+dur*.6);
   g.gain.setValueAtTime(peak,t); g.gain.exponentialRampToValueAtTime(.001,t+dur);
@@ -213,12 +269,13 @@ const DRUMFX=[
   (t,v)=>{const g=ctx.createGain(),f=ctx.createBiquadFilter(); f.type="bandpass"; f.frequency.value=800; f.Q.value=2;
           g.gain.setValueAtTime(.5*v,t); g.gain.exponentialRampToValueAtTime(.001,t+.35);
           f.connect(g); g.connect(drumBus);
-          [560,845].forEach(fr=>{const o=ctx.createOscillator(); o.type="square"; o.frequency.value=fr; o.connect(f); o.start(t); o.stop(t+.4);});}, // cowbell
+          [560,845].forEach(fr=>{const o=ctx.createOscillator(); o.type="square"; o.frequency.value=fr*pm; o.connect(f); o.start(t); o.stop(t+.4);});}, // cowbell
   (t,v)=>tone(t,"sawtooth",1800,90,.3,.45*v),                                                  // zap
 ];
 function trigger(i,t,v=1){
+  pm=Math.pow(2,semis(params.dpitch)/12);
   if(samples[i]){
-    const s=ctx.createBufferSource(), g=ctx.createGain(); s.buffer=samples[i]; g.gain.value=v;
+    const s=ctx.createBufferSource(), g=ctx.createGain(); s.buffer=samples[i]; s.playbackRate.value=pm; g.gain.value=v;
     s.connect(g); g.connect(drumBus); s.start(t);
   } else DRUMFX[i](t,v);
 }
@@ -227,7 +284,7 @@ function trigger(i,t,v=1){
 const live=new Map();            // note -> voice
 let bend=0;                       // semitones
 function makeVoice(note,t,vel=1){
-  const P=PRESETS[S.preset], f=440*Math.pow(2,(note-69)/12);
+  const P=PRESETS[S.preset], f=440*Math.pow(2,(note+semis(params.mpitch)-69)/12);
   const g=ctx.createGain(); g.gain.value=0;
   let out=g;
   if(P.filt){
@@ -397,18 +454,38 @@ function buildHeader(){
   $("scale").onchange=e=>{S.scale=e.target.value; renderRoll(); save();};
 }
 function buildKnobs(){
-  const k=$("knobs");
-  KNOBS.forEach(([key,label,kn])=>{
-    const d=document.createElement("div"); d.className="knob";
-    d.innerHTML=`<b>${label}</b><small>${kn}</small><input type="range" min="0" max="1000" id="k_${key}">`;
-    k.appendChild(d);
-    const inp=d.querySelector("input"); inp.value=params[key]*1000;
-    inp.oninput=()=>setParam(key,inp.value/1000,true);
+  const k=$("knobs"); k.innerHTML="";
+  PAGES.forEach((pg,pi)=>{
+    const box=document.createElement("div"); box.className="kpage"; box.id="kpage"+pi;
+    box.innerHTML=`<h3>${pg.name}</h3><div class="knobs"></div>`; k.appendChild(box);
+    pg.knobs.forEach(([key,label],ki)=>{
+      const d=document.createElement("div"); d.className="knob";
+      d.innerHTML=`<b>${label}</b><small>K${ki+1}</small><input type="range" min="0" max="1000" id="k_${key}">`;
+      box.querySelector(".knobs").appendChild(d);
+      const inp=d.querySelector("input"); inp.value=params[key]*1000;
+      inp.oninput=()=>setParam(key,inp.value/1000,true);
+    });
   });
-  updateBpm();
+  setPage(page,true); updateBpm();
+}
+function setPage(n,quiet){
+  page=n; PAGES.forEach((_,i)=>$("kpage"+i).classList.toggle("active",i===n));
+  if(!quiet) toast(PAGES[n].name+" knobs on");
+}
+let toastT;
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),900); }
+function knobText(key,v){
+  const sg=n=>(n>0?"+":"")+n;
+  switch(key){
+    case"tempo": return Math.round(60+v*140)+" beats/min";
+    case"dj": return Math.abs(v-.5)<.02?"off":v<.5?"muffled "+Math.round((.5-v)*200)+"%":"thin "+Math.round((v-.5)*200)+"%";
+    case"dpitch": case"mpitch": return sg(semis(v))+" notes";
+    default: return Math.round(v*100)+"%";
+  }
 }
 function setParam(key,v,fromUI){
   params[key]=v; if(!fromUI) $("k_"+key).value=v*1000;
+  for(const pg of PAGES){ const kk=pg.knobs.find(x=>x[0]===key); if(kk){ toast(kk[1]+": "+knobText(key,v)); break; } }
   applyParams(); if(key==="tempo") updateBpm(); saveSoon();
 }
 function updateBpm(){ $("bpmv").textContent=bpm(); }
@@ -475,7 +552,9 @@ function onMidi(e){
   } else if(cmd===0x80||(cmd===0x90&&d2===0)){
     if(ch!==9) noteOff(d1);
   } else if(cmd===0xB0){
-    if(d1>=70&&d1<=77) setParam(KNOBS[d1-70][0],d2/127,false);
+    if(d1>=70&&d1<=77) setParam(PAGES[page].knobs[d1-70][0],d2/127,false);
+  } else if(cmd===0xC0){            // program change (PROG SELECT on the MPK) flips knob page
+    setPage(d1%PAGES.length);
   } else if(cmd===0xE0){
     setBend(((d2<<7|d1)-8192)/8192*2);
   }
@@ -488,6 +567,7 @@ const down=new Set();
 addEventListener("keydown",e=>{
   if(e.repeat||e.ctrlKey||e.metaKey||e.altKey||e.target.tagName==="SELECT") return;
   const k=e.key.toLowerCase();
+  if(k==="p"){ setPage((page+1)%PAGES.length); return; }
   if(k===" "){ e.preventDefault(); if(ctx) playing?stop():start(); return; }
   if(!ctx) return;
   if(k>="1"&&k<="8"){ hitPad(+k-1); return; }
@@ -545,7 +625,7 @@ function toggleSave(){
 
 /* ============ boot ============ */
 async function boot(){
-  initAudio(); await openDB();
+  initAudio(); await initCrush(); await openDB();
   for(const [k,ab] of await dbAll()) await setSampleQuiet(k,ab);
   setupMidi(); $("start").remove();
 }
@@ -561,6 +641,7 @@ $("rec").onclick=()=>{ if(!ctx) return; if(recording){setRec(false);} else { set
 $("clear").onclick=()=>{ if(confirm("Clear this pattern?")){ S.pats[S.cur]=emptyPat(); renderAll(); save(); } };
 $("demo").onclick=()=>{ demoBeat(); };
 $("save").onclick=toggleSave;
+$("pagebtn").onclick=()=>setPage((page+1)%PAGES.length);
 $("startBtn").onclick=boot;
 requestAnimationFrame(viz);
 </script>
