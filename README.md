@@ -9,9 +9,9 @@ One HTML file, no install, no internet needed.
 (One-time setup for the repo owner: merge to `main`, then Settings → Pages → Source: **GitHub Actions**.)
 
 ## BeatHero 🎸 (guitar-hero style game)
-Same MPK, same one-file/no-install setup: **https://ykolodyazhny.github.io/mk3proj/game.html** (or `./run.sh` and open `/game.html`; there's a link back to BeatBox in the corner).
+Pixel-art pink-and-black look. Same MPK, same one-file/no-install setup: **https://ykolodyazhny.github.io/mk3proj/game.html** (or `./run.sh` and open `/game.html`; there's a link back to BeatBox in the corner).
 - Pick a song by playing C D E F (or click) (4 songs, easy → wild). Gems fly down a neon synthwave highway; hit the matching pad as they reach the glowing line.
-- **7 lanes, one per white key: C D E F G A B.** Each lane plays its own note when you hit it, so you're really playing the melody. Black keys count as the white key below, any octave works. Press **M** to switch between keys / pads / both (pads 1–7, pad 8 = B). Computer keys **A S D F J K L** or **1–7** always work.
+- **5 lanes: C D E F G**, one per white key. Each lane plays its own note when you hit it, so you're really playing the melody. Black keys count as the white key below (A and B are ignored), any octave works. Press **M** to switch between keys / pads / both (pads 1–5). Computer keys **A S D F G** or **1–5** always work.
 - Hit a gem and your pad plays the melody note over the backing band; miss and it goes quiet. Streaks build a x2/x3/x4 multiplier, x4 = rainbow fever mode.
 - The light show **builds as you play**: it starts with just stars and a faint grid, then the sun rises, lasers sweep, warp rings pulse, speaker towers bounce and fireworks pop as your streak and the song progress build (a miss cools it down). Two neon trees grow with every hit and burst into blossom with drifting petals; fireflies float by. All of it stays at the sides, away from the gems.
 - Timing feels off? **[** / **]** shifts it 10 ms (remembered). **Esc** quits to the song list. Best stars per song are remembered.
