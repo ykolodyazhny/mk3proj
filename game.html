@@ -43,8 +43,8 @@ small{color:#a89bd8}
   <h1>BEAT<b>HERO</b></h1>
   <p>Hit the pads as the gems reach the glowing line!</p>
   <div id="songs"></div>
-  <p>🎹 <b>MPK Mini:</b> hit pad <b>1–4</b> to pick a song &nbsp;·&nbsp; 🖱 or click &nbsp;·&nbsp; ⌨ keys <b>1–4</b></p>
-  <small>Lanes: pads 1&amp;5 · 2&amp;6 · 3&amp;7 · 4&amp;8 (any pad in the column works) — or piano keys, or computer keys <b>D F J K</b>.<br>
+  <p>🎹 <b>MPK Mini keys:</b> play <b>C D E F</b> (the 4 white keys) to pick a song / hit the lanes &nbsp;·&nbsp; 🖱 or click &nbsp;·&nbsp; ⌨ keys <b>1–4</b></p>
+  <small>Input: <b id="modev"></b> — press <b>M</b> to switch (keys / pads / both).<br>Keys: <b>C D E F</b> = lanes 1–4, <b>G A B</b> repeat lanes 1–3, black keys = the white key below; same in every octave. Pads: columns 1&amp;5 · 2&amp;6 · 3&amp;7 · 4&amp;8. Computer keys: <b>D F J K</b>.<br>
   If hits feel early/late press <b>[</b> / <b>]</b> to tune timing: <span id="offv">0</span> ms</small>
 </div>
 
@@ -236,12 +236,17 @@ function setupMidi(){
     acc.onstatechange=refresh; refresh();
   }).catch(()=>{ lab.textContent="MIDI blocked – keys D F J K work"; });
 }
+const MODES=["keys","pads","both"], MODE_TXT={keys:"🎹 piano keys",pads:"🥁 pads",both:"🎹+🥁 keys and pads"};
+let inputMode=(()=>{try{return localStorage.getItem("beathero-mode")||"keys"}catch(e){return "keys"}})(); if(!MODES.includes(inputMode)) inputMode="keys";
+const KEYLANE=[0,0,1,1,2,3,3,0,0,1,1,2]; // C C# D D# E F F# G G# A A# B  ->  C D E F = lanes 1-4, G A B repeat 1-3 (same in every octave)
+function setMode(m){ inputMode=m; $("modev").textContent=MODE_TXT[m]; try{localStorage.setItem("beathero-mode",m)}catch(e){} }
+setMode(inputMode);
 function onMidi(e){
   const [st,d1,d2]=e.data, cmd=st&0xf0, ch=st&0x0f;
   if(cmd===0x90&&d2>0){
     initAudio();
-    if(ch===9) press((((d1-36)%4)+4)%4,e.timeStamp);
-    else press(Math.floor(((d1%12)+12)%12/3),e.timeStamp);
+    if(ch===9){ if(inputMode!=="keys") press((((d1-36)%4)+4)%4,e.timeStamp); }
+    else if(inputMode!=="pads") press(KEYLANE[((d1%12)+12)%12],e.timeStamp);
   }
 }
 setupMidi();
@@ -253,6 +258,7 @@ addEventListener("keydown",e=>{
   if(e.repeat||e.ctrlKey||e.metaKey||e.altKey) return;
   const k=e.key.toLowerCase();
   if(k==="["||k==="]"){ offset+=k==="]"?10:-10; $("offv").textContent=offset; try{localStorage.setItem("beathero-off",offset)}catch(_){} return; }
+  if(k==="m"){ setMode(MODES[(MODES.indexOf(inputMode)+1)%MODES.length]); return; }
   if(k==="escape"){ if(state==="play"||state==="results") stopSong(true); return; }
   if(k in KEYS){ initAudio(); if(state==="menu"||state==="results"||state==="play") press(KEYS[k]); }
 });
@@ -426,7 +432,8 @@ function drawHighway(st,tt,kp,ph){
     g.shadowColor=c; g.shadowBlur=10+h*40+kp*8; g.lineWidth=5; g.strokeStyle=c; g.fillStyle=h>.02?c+Math.floor(40+h*180).toString(16).padStart(2,"0"):"rgba(0,0,0,.4)";
     g.beginPath(); g.arc(0,0,laneW*.42,0,7); g.fill(); g.stroke();
     g.restore(); }
-  g.shadowBlur=0;
+  g.shadowBlur=0; g.textAlign="center"; g.font=`bold ${Math.round(laneW*.2)}px 'Trebuchet MS',sans-serif`; g.fillStyle="rgba(255,255,255,.7)";
+  const lbl=inputMode==="pads"?["1","2","3","4"]:["C","D","E","F"]; for(let l=0;l<4;l++) g.fillText(lbl[l],cx+(l-1.5)*laneW,hitY+laneW*.42); g.textAlign="left";
   g.strokeStyle="rgba(255,255,255,.75)"; g.lineWidth=2; g.beginPath(); g.moveTo(cx-laneW*2.1,hitY); g.lineTo(cx+laneW*2.1,hitY); g.stroke();
 }
 function drawNotes(st){
