@@ -43,8 +43,8 @@ small{color:#a89bd8}
   <h1>BEAT<b>HERO</b></h1>
   <p>Hit the pads as the gems reach the glowing line!</p>
   <div id="songs"></div>
-  <p>🎹 <b>MPK Mini keys:</b> play <b>C D E F</b> (the 4 white keys) to pick a song / hit the lanes &nbsp;·&nbsp; 🖱 or click &nbsp;·&nbsp; ⌨ keys <b>1–4</b></p>
-  <small>Input: <b id="modev"></b> — press <b>M</b> to switch (keys / pads / both).<br>Keys: <b>C D E F</b> = lanes 1–4, <b>G A B</b> repeat lanes 1–3, black keys = the white key below; same in every octave. Pads: columns 1&amp;5 · 2&amp;6 · 3&amp;7 · 4&amp;8. Computer keys: <b>D F J K</b>.<br>
+  <p>🎹 <b>MPK Mini keys:</b> play <b>C D E F</b> to pick a song &nbsp;·&nbsp; 🖱 or click &nbsp;·&nbsp; ⌨ keys <b>1–4</b></p>
+  <small>Input: <b id="modev"></b> — press <b>M</b> to switch (keys / pads / both).<br>Keys: one lane per white key — <b>C D E F G A B</b> — and each plays its own note. Black keys count as the white key below. Any octave works. Pads: 1–7 (pad 8 = B). Computer keys: <b>A S D F J K L</b> or <b>1–7</b>.<br>
   If hits feel early/late press <b>[</b> / <b>]</b> to tune timing: <span id="offv">0</span> ms</small>
 </div>
 
@@ -66,7 +66,10 @@ function resize(){ DPR=Math.min(2,devicePixelRatio||1); W=innerWidth; H=innerHei
 addEventListener("resize",resize); resize();
 
 /* ============ songs ============ */
-const LANES=["#ff3b8d","#ffd23f","#3bf0ff","#9b5cff"];
+const NL=7, MID=(NL-1)/2, HALF=NL/2;
+const LANES=["#ff3b8d","#ff8a3b","#ffd23f","#5dff7a","#3bf0ff","#5c8bff","#b85cff"];
+const NOTE_NAMES=["C","D","E","F","G","A","B"], LANE_MIDI=[72,74,76,77,79,81,83];   // C5 D5 E5 F5 G5 A5 B5
+const WHITE_IDX=[0,0,1,1,2,3,3,4,4,5,5,6];  // pitch class -> lane (black keys use the white key below)
 const DBL={a:[0,1],b:[1,2],c:[2,3],d:[0,3]};
 const CH={m:[0,3,7,12],M:[0,4,7,12]};
 const SONGS=[
@@ -76,7 +79,7 @@ const SONGS=[
   seq:"--AABBAACCAADDAABBCCDDAA",
   kick:[0,8],snare:[4,12],hat:2},
  {name:"Neon Nights",diff:"★★☆☆ Groovy",bpm:118,col:"#ff3b8d",
-  chords:[[57,"m"],[55,"M"],[53,"M"],[52,"M"]],
+  chords:[[57,"m"],[55,"M"],[53,"M"],[52,"m"]],
   p:{A:"0.1.2.1.0.1.3...",B:"0..1.2..3..2.1..",C:"0.12.3.21.0.3.2.",D:"a...b...c...d...",E:"0.1.2.3.3.2.1.0."},
   seq:"--AABBAABBCCDDEEAABBCCDDEEAADDEE",
   kick:[0,6,8,14],snare:[4,12],hat:2},
@@ -99,11 +102,13 @@ function buildChart(s){
     let r=ch[0]; while(r<57) r+=12; while(r>68) r-=12;
     const base=r+12, iv=CH[ch[1]];
     if(pc==="-") continue;
-    const pat=s.p[pc];
+    const pat=s.p[pc], deg=WHITE_IDX[ch[0]%12];
     for(let i=0;i<16;i++){
       const c=pat[i]; if(c==="."||c===undefined) continue;
-      const lanes=DBL[c]||[+c];
-      notes.push({t:(b*16+i)*sd,lanes,m:lanes.map(l=>base+iv[l]),hit:false,miss:false});
+      // pattern digits are chord tones (root,3rd,5th,octave) -> walk the C-major scale from the chord root; off-beats get a passing tone
+      let lanes=(DBL[c]||[+c]).map(l=>(deg+[0,2,4,7][l]+(i%4===2?1:0))%NL);
+      lanes=[...new Set(lanes)];
+      notes.push({t:(b*16+i)*sd,lanes,m:lanes.map(l=>LANE_MIDI[l]),hit:false,miss:false});
     }
   }
   return notes;
@@ -133,7 +138,7 @@ function chime(){ if(!ctx||!master) return; const t=ctx.currentTime; [88,95,100]
 let state="menu", song=null, chart=[], t0=0, perfBase=0, sched=null, nextStep=0, endT=0;
 let offset=+(()=>{try{return localStorage.getItem("beathero-off")}catch(e){return 0}})()||0; // ms
 $("offv").textContent=offset;
-let score=0,combo=0,best=0,mult=1,counts={perfect:0,great:0,good:0,miss:0},total=0,hitsAcc=0,meter=.5,fever=0,shake=0,laneHeat=[0,0,0,0],laneFlash=[0,0,0,0],parts=[],rings=[],pops=[],streakPulse=0,lastMilestone=0;
+let score=0,combo=0,best=0,mult=1,counts={perfect:0,great:0,good:0,miss:0},total=0,hitsAcc=0,meter=.5,fever=0,shake=0,laneHeat=Array(7).fill(0),laneFlash=Array(7).fill(0),parts=[],rings=[],pops=[],streakPulse=0,lastMilestone=0;
 const approach=1.5, LEADIN=3;
 const bests=(()=>{try{return JSON.parse(localStorage.getItem("beathero-best")||"{}")}catch(e){return {}}})();
 
@@ -147,7 +152,7 @@ function startSong(i){
   initAudio();
   song=SONGS[i]; song.idx=i; chart=buildChart(song); total=chart.reduce((a,n)=>a+n.lanes.length,0);
   score=0;combo=0;best=0;mult=1;counts={perfect:0,great:0,good:0,miss:0};hitsAcc=0;meter=.5;fever=0;shake=0;
-  energy=0;growth=0;petals=[];lvlShown=0;banner.age=9;fw=[];laneHeat=[0,0,0,0];laneFlash=[0,0,0,0];parts=[];rings=[];pops=[];streakPulse=0;lastMilestone=0;
+  energy=0;growth=0;petals=[];lvlShown=0;banner.age=9;fw=[];laneHeat=Array(NL).fill(0);laneFlash=Array(NL).fill(0);parts=[];rings=[];pops=[];streakPulse=0;lastMilestone=0;
   master=ctx.createGain(); master.gain.value=.8; master.connect(ctx.destination);
   const now=ctx.currentTime+.15; t0=now+LEADIN; nextStep=0;
   const ts=ctx.getOutputTimestamp?ctx.getOutputTimestamp():null;
@@ -193,7 +198,7 @@ function songTime(){ return ctx.currentTime-(ctx.outputLatency||ctx.baseLatency|
 
 /* ============ input & judging ============ */
 function press(lane,evTs){
-  if(state==="menu"){ startSong(lane); return; }
+  if(state==="menu"){ if(lane<SONGS.length) startSong(lane); return; }
   if(state==="results"){ if(performance.now()>resultsAt) stopSong(true); return; }
   if(state!=="play") return;
   let t=songTime();
@@ -229,30 +234,29 @@ function burst(lane,q){
 /* MIDI */
 function setupMidi(){
   const lab=$("midi").querySelector("span");
-  if(!navigator.requestMIDIAccess){ lab.textContent="MIDI not supported (use Chrome/Firefox) – keys D F J K work"; return; }
+  if(!navigator.requestMIDIAccess){ lab.textContent="MIDI not supported (use Chrome/Firefox) – keys A S D F J K L work"; return; }
   navigator.requestMIDIAccess().then(acc=>{
     const refresh=()=>{ const names=[]; acc.inputs.forEach(i=>{ i.onmidimessage=onMidi; names.push(i.name); });
-      $("midi").classList.toggle("ok",names.length>0); lab.textContent=names.length?names.join(", "):"No MIDI keyboard – keys D F J K work"; };
+      $("midi").classList.toggle("ok",names.length>0); lab.textContent=names.length?names.join(", "):"No MIDI keyboard – keys A S D F J K L work"; };
     acc.onstatechange=refresh; refresh();
-  }).catch(()=>{ lab.textContent="MIDI blocked – keys D F J K work"; });
+  }).catch(()=>{ lab.textContent="MIDI blocked – keys A S D F J K L work"; });
 }
 const MODES=["keys","pads","both"], MODE_TXT={keys:"🎹 piano keys",pads:"🥁 pads",both:"🎹+🥁 keys and pads"};
 let inputMode=(()=>{try{return localStorage.getItem("beathero-mode")||"keys"}catch(e){return "keys"}})(); if(!MODES.includes(inputMode)) inputMode="keys";
-const KEYLANE=[0,0,1,1,2,3,3,0,0,1,1,2]; // C C# D D# E F F# G G# A A# B  ->  C D E F = lanes 1-4, G A B repeat 1-3 (same in every octave)
 function setMode(m){ inputMode=m; $("modev").textContent=MODE_TXT[m]; try{localStorage.setItem("beathero-mode",m)}catch(e){} }
 setMode(inputMode);
 function onMidi(e){
   const [st,d1,d2]=e.data, cmd=st&0xf0, ch=st&0x0f;
   if(cmd===0x90&&d2>0){
     initAudio();
-    if(ch===9){ if(inputMode!=="keys") press((((d1-36)%4)+4)%4,e.timeStamp); }
-    else if(inputMode!=="pads") press(KEYLANE[((d1%12)+12)%12],e.timeStamp);
+    if(ch===9){ if(inputMode!=="keys") press(Math.min(NL-1,(((d1-36)%8)+8)%8),e.timeStamp); }
+    else if(inputMode!=="pads") press(WHITE_IDX[((d1%12)+12)%12],e.timeStamp);
   }
 }
 setupMidi();
 
 /* keyboard */
-const KEYS={d:0,f:1,j:2,k:3,"1":0,"2":1,"3":2,"4":3};
+const KEYS={a:0,s:1,d:2,f:3,j:4,k:5,l:6,"1":0,"2":1,"3":2,"4":3,"5":4,"6":5,"7":6};
 const held=new Set();
 addEventListener("keydown",e=>{
   if(e.repeat||e.ctrlKey||e.metaKey||e.altKey) return;
@@ -270,10 +274,10 @@ let hy,hitY,cx,laneW,SMIN=1/6;
 let growth=0, petals=[], flies=Array.from({length:22},(_,i)=>({x:Math.random(),y:Math.random(),p:Math.random()*9,s:.3+Math.random()})), energy=0, lvlShown=0, banner={txt:"",age:9}, fw=[];
 const LEVELS=[[.12,"☀ SUN RISING"],[.3,"⚡ LASERS!"],[.5,"🌀 WARP RINGS!"],[.7,"🔊 SPEAKER TOWERS!"],[.85,"🎆 FIREWORKS!"]];
 const sm=(a,b,x)=>{x=Math.max(0,Math.min(1,(x-a)/(b-a)));return x*x*(3-2*x);};
-function layout(){ cx=W/2; hy=H*.24; hitY=H*.82; laneW=Math.min(W*.13,H*.15,120); }
+function layout(){ cx=W/2; hy=H*.24; hitY=H*.82; laneW=Math.min(W*.075,H*.11,92); }
 const sOf=dt=>dt>=0?1/(1+dt/approach*5):1-dt*5/approach;
 const yOf=s=>hy+(hitY-hy)*(s-SMIN)/(1-SMIN);
-function lanePos(l,dt){ layout(); const s=sOf(dt); return [cx+(l-1.5)*laneW*s, yOf(s), s]; }
+function lanePos(l,dt){ layout(); const s=sOf(dt); return [cx+(l-MID)*laneW*s, yOf(s), s]; }
 const hue=t=>`hsl(${(t*120)%360} 100% 60%)`;
 
 function draw(ts){
@@ -297,7 +301,7 @@ function draw(ts){
     if(energy>.85&&beatPh<.04&&(Math.random()<.5)) fw.push({x:W*(.1+Math.random()*.8),y:hy*(.2+Math.random()*.6),age:0,hue:Math.random()*360,n:30});
     $("count");
   } else { fever=Math.max(0,fever-dt); kickP=.5+.5*Math.sin(tt*3); energy+=((state==='menu'?.55:.3)-energy)*dt; if(state==='menu') growth+=(.7-growth)*dt*.5; }
-  for(let i=0;i<4;i++){ laneHeat[i]=Math.max(0,(laneHeat[i]||0)-dt*3.5); }
+  for(let i=0;i<NL;i++){ laneHeat[i]=Math.max(0,(laneHeat[i]||0)-dt*3.5); }
   shake=Math.max(0,shake-dt*2.2); streakPulse=Math.max(0,streakPulse-dt*2);
 
   g.save();
@@ -322,7 +326,8 @@ function drawBackground(tt,kp,st){
   const sr=Math.min(W,H)*(.22+kp*.015), sy=hy+4+(1-sm(.0,.25,energy))*sr*1.05;
   g.save(); g.beginPath(); g.rect(0,0,W,hy+2); g.clip();
   const sg=g.createLinearGradient(0,sy-sr,0,sy+sr); sg.addColorStop(0,"#ffe34d"); sg.addColorStop(.55,"#ff3b8d"); sg.addColorStop(1,"#9b5cff");
-  g.shadowColor="#ff3b8d"; g.shadowBlur=60+kp*40; g.fillStyle=sg; g.beginPath(); g.arc(cx,sy,sr,0,7); g.fill(); g.shadowBlur=0;
+  const hg=g.createRadialGradient(cx,sy,sr*.8,cx,sy,sr*(1.6+kp*.2)); hg.addColorStop(0,"rgba(255,59,141,.55)"); hg.addColorStop(1,"rgba(255,59,141,0)"); g.fillStyle=hg; g.fillRect(0,0,W,hy+2);
+  g.fillStyle=sg; g.beginPath(); g.arc(cx,sy,sr,0,7); g.fill();
   g.fillStyle="#12062c"; for(let i=0;i<7;i++){ const y=sy-sr*.1+i*sr*.14, h=2+i*1.6; g.fillRect(cx-sr,y,sr*2,h); }
   g.restore();
   // mountains
@@ -333,8 +338,9 @@ function drawBackground(tt,kp,st){
   const la=sm(.28,.5,energy);
   if(la>0){ const n=2+Math.round(energy*6); g.save(); g.globalCompositeOperation="lighter"; g.lineWidth=3+energy*4;
     for(let i=0;i<n;i++){ const side=i%2?1:-1, ox=cx+side*(W*.22+(i>>1)*W*.07), ang=Math.sin(tt*(.8+i*.23)+i*1.7)*.55+side*-.25;
-      const col=`hsla(${(i*70+tt*40+f*200)%360} 100% 60% / ${la*(.35+kp*.35)})`; g.strokeStyle=col; g.shadowColor=col; g.shadowBlur=18;
-      g.beginPath(); g.moveTo(ox,hy+2); g.lineTo(ox+Math.sin(ang)*H*1.2,hy+2-Math.cos(ang)*H*1.2); g.stroke(); }
+      const col=`hsla(${(i*70+tt*40+f*200)%360} 100% 60% / ${la*(.35+kp*.35)})`; g.strokeStyle=col; const ex=ox+Math.sin(ang)*H*1.2, ey=hy+2-Math.cos(ang)*H*1.2;
+      g.lineWidth=(3+energy*4)*3; g.globalAlpha=.25; g.beginPath(); g.moveTo(ox,hy+2); g.lineTo(ex,ey); g.stroke();
+      g.lineWidth=3+energy*4; g.globalAlpha=1; g.beginPath(); g.moveTo(ox,hy+2); g.lineTo(ex,ey); g.stroke(); }
     g.restore(); }
   // warp rings expanding from the vanishing point (energy > .5)
   const ra=sm(.48,.7,energy);
@@ -359,31 +365,38 @@ function drawBackground(tt,kp,st){
       const x=side<0? W*.03+i*(bw+gap) : W-W*.03-(i+1)*(bw+gap)+gap;
       const h=(H*.12+H*.28*Math.abs(Math.sin(tt*3.1+i*1.3+(playing2()?st*4:0)))*(.4+kp*.6))*ta;
       const tg=g.createLinearGradient(0,hitY,0,hitY-h); tg.addColorStop(0,`hsla(${(320+i*18+tt*30)%360} 100% 55% / .9)`); tg.addColorStop(1,`hsla(${(200+i*18+tt*30)%360} 100% 65% / .5)`);
-      g.fillStyle=tg; g.shadowColor="#ff3b8d"; g.shadowBlur=14; g.fillRect(x,hitY-h,bw,h); }
-    g.shadowBlur=0; }
+      g.fillStyle=tg; g.fillRect(x,hitY-h,bw,h); }
+  }
+}
+const treeCache={};
+function renderTree(c,size,seed,gw){
+  const x=c.getContext("2d"); x.clearRect(0,0,c.width,c.height); x.lineCap="round";
+  const rnd=i=>{ const v=Math.sin(i*12.9898+seed*78.233)*43758.5453; return v-Math.floor(v); };
+  const bl=sm(.55,.95,gw);
+  (function br(bx,by,ang,len,d,id){
+    const k=Math.max(0,Math.min(1,gw*9.5-d)); if(k<=0) return;
+    const l=len*k, x2=bx+Math.sin(ang)*l, y2=by-Math.cos(ang)*l;
+    x.strokeStyle=d<3?"#2b0d3f":"#4a1a5c"; x.lineWidth=Math.max(1,(8-d)*size*.014); x.beginPath(); x.moveTo(bx,by); x.lineTo(x2,y2); x.stroke();
+    if(d>=6){ if(bl>0&&k>.9){ x.fillStyle=`hsla(${322+rnd(id)*30} 100% ${68+rnd(id+3)*14}% / ${bl*.85})`; x.beginPath(); x.arc(x2,y2,size*.02*(.6+rnd(id+1))*bl,0,7); x.fill(); } return; }
+    br(x2,y2,ang-(.3+rnd(id)*.3),l*(.72+rnd(id+5)*.08),d+1,id*2+1);
+    br(x2,y2,ang+(.3+rnd(id+2)*.3),l*(.72+rnd(id+7)*.08),d+1,id*2+2);
+  })(c.width/2,c.height-2,0,size*.42,0,1);
 }
 function drawTree(x,y,size,seed,tt){
   const gw=growth; if(gw<=.01) return;
-  const rnd=i=>{ const v=Math.sin(i*12.9898+seed*78.233)*43758.5453; return v-Math.floor(v); };
-  const bl=sm(.55,.95,gw), sway=Math.sin(tt*.7+seed)*.035;
-  g.save(); g.lineCap="round";
-  (function br(bx,by,ang,len,d,id){
-    const k=Math.max(0,Math.min(1,gw*9.5-d)); if(k<=0) return;
-    const l=len*k, a=ang+sway*(d*.4+1), x2=bx+Math.sin(a)*l, y2=by-Math.cos(a)*l;
-    g.strokeStyle=d<3?"#2b0d3f":"#4a1a5c"; g.shadowColor="#ff3b8d"; g.shadowBlur=6;
-    g.lineWidth=Math.max(1,(8-d)*size*.014); g.beginPath(); g.moveTo(bx,by); g.lineTo(x2,y2); g.stroke();
-    if(d>=6){ if(bl>0&&k>.9){ g.shadowBlur=10; g.fillStyle=`hsla(${322+rnd(id)*30} 100% ${68+rnd(id+3)*14}% / ${bl*.8})`; g.beginPath(); g.arc(x2,y2,size*.02*(.6+rnd(id+1))*bl,0,7); g.fill(); } return; }
-    br(x2,y2,a-(.3+rnd(id)*.3),l*(.72+rnd(id+5)*.08),d+1,id*2+1);
-    br(x2,y2,a+(.3+rnd(id+2)*.3),l*(.72+rnd(id+7)*.08),d+1,id*2+2);
-  })(x,y,0,size*.42,0,1);
-  g.restore();
+  const key=Math.round(gw*40), sz=Math.round(size);
+  let t=treeCache[seed];
+  if(!t||t.key!==key||t.sz!==sz){ if(!t){ t=treeCache[seed]={c:document.createElement("canvas")}; } t.key=key; t.sz=sz; t.c.width=Math.round(sz*2.4); t.c.height=Math.round(sz*1.7); renderTree(t.c,sz,seed,key/40); }
+  g.save(); g.translate(x,y); g.transform(1,0,Math.sin(tt*.7+seed)*.05,1,0,0);
+  g.globalAlpha=.95; g.drawImage(t.c,-t.c.width/2,-t.c.height+2); g.restore();
+  const bl=sm(.55,.95,gw);
   if(bl>.3&&Math.random()<bl*.05&&petals.length<40) petals.push({x:x+(Math.random()-.5)*size*.9,y:y-size*(.6+Math.random()*.5),vy:20+Math.random()*25,p:Math.random()*6,age:0});
 }
 function drawAmbient(dt,tt){
   const ea=sm(.05,.4,energy);
   g.save(); g.globalCompositeOperation="lighter";
   for(const f of flies){ f.x+=Math.sin(tt*.4+f.p)*dt*.02; f.y-=dt*.012*f.s; if(f.y<.3) f.y=1.02;
-    const a=ea*(.25+.35*Math.sin(tt*2+f.p)); if(a<=0) continue; g.fillStyle=`hsla(${f.p*40%360+40} 100% 70% / ${a})`; g.shadowColor=g.fillStyle; g.shadowBlur=10; g.beginPath(); g.arc(f.x*W,f.y*H,1.8*f.s+.8,0,7); g.fill(); }
+    const a=ea*(.25+.35*Math.sin(tt*2+f.p)); if(a<=0) continue; g.fillStyle=`hsla(${f.p*40%360+40} 100% 70% / ${a})`; g.beginPath(); g.arc(f.x*W,f.y*H,2.2*f.s+1,0,7); g.fill(); }
   g.shadowBlur=0;
   for(let i=petals.length-1;i>=0;i--){ const q=petals[i]; q.age+=dt; q.y+=q.vy*dt; q.x+=Math.sin(tt*1.5+q.p)*18*dt; if(q.y>H||q.age>9){petals.splice(i,1);continue;}
     g.fillStyle=`rgba(255,160,215,${.55*Math.min(1,q.age*2)})`; g.save(); g.translate(q.x,q.y); g.rotate(q.p+tt); g.beginPath(); g.ellipse(0,0,4,2,0,0,7); g.fill(); g.restore(); }
@@ -403,38 +416,38 @@ function drawIdleHighway(tt,kp){
   g.save(); g.globalAlpha=.55; hwFill(); hwLines(tt,0); g.restore();
 }
 function hwFill(){
-  const hw=laneW*2, tw=hw*SMIN;
+  const hw=laneW*HALF, tw=hw*SMIN;
   g.fillStyle="rgba(12,4,34,.82)"; g.beginPath(); g.moveTo(cx-tw,hy); g.lineTo(cx+tw,hy); g.lineTo(cx+hw*1.2,H); g.lineTo(cx-hw*1.2,H); g.closePath(); g.fill();
 }
 function hwLines(tt,pulse){
   const col=fever>.05?hue(tt):"#ff3b8d";
   g.lineWidth=3; g.shadowColor=col; g.shadowBlur=14+pulse*18; g.strokeStyle=col;
-  for(const sgn of [-1,1]){ g.beginPath(); g.moveTo(cx+sgn*laneW*2*SMIN,hy); g.lineTo(cx+sgn*laneW*2*1.2,H); g.stroke(); }
+  for(const sgn of [-1,1]){ g.beginPath(); g.moveTo(cx+sgn*laneW*HALF*SMIN,hy); g.lineTo(cx+sgn*laneW*HALF*1.2,H); g.stroke(); }
   g.shadowBlur=0; g.lineWidth=1; g.strokeStyle="rgba(255,255,255,.18)";
-  for(let l=1;l<4;l++){ g.beginPath(); g.moveTo(cx+(l-2)*laneW*SMIN,hy); g.lineTo(cx+(l-2)*laneW*1.2,H); g.stroke(); }
+  for(let l=1;l<NL;l++){ g.beginPath(); g.moveTo(cx+(l-HALF)*laneW*SMIN,hy); g.lineTo(cx+(l-HALF)*laneW*1.2,H); g.stroke(); }
 }
 function drawHighway(st,tt,kp,ph){
   hwFill();
   // lane beams
-  for(let l=0;l<4;l++){ const a=laneHeat[l]; if(a<=.01) continue;
-    const x0=cx+(l-2)*laneW*SMIN, x1=cx+(l-1)*laneW*SMIN, y0=hy, xa=cx+(l-2)*laneW, xb=cx+(l-1)*laneW;
+  for(let l=0;l<NL;l++){ const a=laneHeat[l]; if(a<=.01) continue;
+    const x0=cx+(l-HALF)*laneW*SMIN, x1=cx+(l+1-HALF)*laneW*SMIN, y0=hy, xa=cx+(l-HALF)*laneW, xb=cx+(l+1-HALF)*laneW;
     const bg=g.createLinearGradient(0,hitY,0,hy+30); bg.addColorStop(0,LANES[l]+"cc"); bg.addColorStop(1,LANES[l]+"00");
     g.globalAlpha=a*.8; g.fillStyle=bg; g.beginPath(); g.moveTo(xa,hitY); g.lineTo(xb,hitY); g.lineTo(x1,y0); g.lineTo(x0,y0); g.fill(); g.globalAlpha=1; }
   // beat lines
   const bd=60/song.bpm; const first=Math.floor(st/bd);
   for(let b=first-1;b<first+Math.ceil(approach/bd)+2;b++){ const dt=b*bd-st; if(dt>approach||dt<-.3) continue; const s=sOf(dt),y=yOf(s);
     const bar=b%4===0; g.strokeStyle=bar?"rgba(255,255,255,.55)":"rgba(255,255,255,.16)"; g.lineWidth=bar?2.5*s+.5:1;
-    g.beginPath(); g.moveTo(cx-laneW*2*s,y); g.lineTo(cx+laneW*2*s,y); g.stroke(); }
+    g.beginPath(); g.moveTo(cx-laneW*HALF*s,y); g.lineTo(cx+laneW*HALF*s,y); g.stroke(); }
   hwLines(tt,kp);
   // hit line + pads
-  for(let l=0;l<4;l++){ const x=cx+(l-1.5)*laneW, h=laneHeat[l], c=LANES[l];
+  for(let l=0;l<NL;l++){ const x=cx+(l-MID)*laneW, h=laneHeat[l], c=LANES[l];
     g.save(); g.translate(x,hitY); g.scale(1,.42);
     g.shadowColor=c; g.shadowBlur=10+h*40+kp*8; g.lineWidth=5; g.strokeStyle=c; g.fillStyle=h>.02?c+Math.floor(40+h*180).toString(16).padStart(2,"0"):"rgba(0,0,0,.4)";
     g.beginPath(); g.arc(0,0,laneW*.42,0,7); g.fill(); g.stroke();
     g.restore(); }
   g.shadowBlur=0; g.textAlign="center"; g.font=`bold ${Math.round(laneW*.2)}px 'Trebuchet MS',sans-serif`; g.fillStyle="rgba(255,255,255,.7)";
-  const lbl=inputMode==="pads"?["1","2","3","4"]:["C","D","E","F"]; for(let l=0;l<4;l++) g.fillText(lbl[l],cx+(l-1.5)*laneW,hitY+laneW*.42); g.textAlign="left";
-  g.strokeStyle="rgba(255,255,255,.75)"; g.lineWidth=2; g.beginPath(); g.moveTo(cx-laneW*2.1,hitY); g.lineTo(cx+laneW*2.1,hitY); g.stroke();
+  const lbl=inputMode==="pads"?["1","2","3","4","5","6","7"]:NOTE_NAMES; for(let l=0;l<NL;l++) g.fillText(lbl[l],cx+(l-MID)*laneW,hitY+laneW*.42); g.textAlign="left";
+  g.strokeStyle="rgba(255,255,255,.75)"; g.lineWidth=2; g.beginPath(); g.moveTo(cx-laneW*(HALF+.1),hitY); g.lineTo(cx+laneW*(HALF+.1),hitY); g.stroke();
 }
 function drawNotes(st){
   for(let i=chart.length-1;i>=0;i--){ const n=chart[i]; const dt=n.t-st; if(dt>approach||dt<-.45) continue;
@@ -454,14 +467,14 @@ function shade(c){ if(c.length!==7) return "#222"; const k=.45; const r=Math.flo
 
 function drawFx(dt){
   for(let i=parts.length-1;i>=0;i--){ const p=parts[i]; p.age+=dt; if(p.age>p.life){parts.splice(i,1);continue;} p.vy+=700*dt; p.x+=p.vx*dt; p.y+=p.vy*dt;
-    g.globalAlpha=1-p.age/p.life; g.fillStyle=p.col; g.shadowColor=p.col; g.shadowBlur=8; g.fillRect(p.x,p.y,p.sz,p.sz); }
+    g.globalAlpha=1-p.age/p.life; g.fillStyle=p.col; g.fillRect(p.x,p.y,p.sz*1.3,p.sz*1.3); }
   g.globalAlpha=1; g.shadowBlur=0;
   for(let i=rings.length-1;i>=0;i--){ const r=rings[i]; r.r+=dt*(r.w?1400:380); r.a-=dt*(r.w?1.2:2.6); if(r.a<=0){rings.splice(i,1);continue;}
     g.save(); g.globalAlpha=r.a; g.strokeStyle=r.col; g.lineWidth=4; g.shadowColor=r.col; g.shadowBlur=16;
-    if(r.w){ g.beginPath(); g.ellipse(cx,hitY,r.r,r.r*.35,0,0,7); } else { const x=cx+(r.lane-1.5)*laneW; g.beginPath(); g.ellipse(x,hitY,laneW*.4+r.r*.3,(laneW*.4+r.r*.3)*.42,0,0,7); }
+    if(r.w){ g.beginPath(); g.ellipse(cx,hitY,r.r,r.r*.35,0,0,7); } else { const x=cx+(r.lane-MID)*laneW; g.beginPath(); g.ellipse(x,hitY,laneW*.4+r.r*.3,(laneW*.4+r.r*.3)*.42,0,0,7); }
     g.stroke(); g.restore(); }
   for(let i=pops.length-1;i>=0;i--){ const p=pops[i]; p.age+=dt; if(p.age>.7){pops.splice(i,1);continue;}
-    const x=cx+(p.lane-1.5)*laneW, y=hitY-60-p.age*90; g.globalAlpha=1-p.age/.7; g.font=`bold ${Math.round(laneW*.2+(1-p.age/.7)*6)}px "Trebuchet MS",sans-serif`; g.textAlign="center";
+    const x=cx+(p.lane-MID)*laneW, y=hitY-60-p.age*90; g.globalAlpha=1-p.age/.7; g.font=`bold ${Math.round(laneW*.2+(1-p.age/.7)*6)}px "Trebuchet MS",sans-serif`; g.textAlign="center";
     g.fillStyle=p.col; g.shadowColor=p.col; g.shadowBlur=12; g.fillText(p.txt,x,y); }
   g.globalAlpha=1; g.shadowBlur=0;
 }
@@ -474,7 +487,7 @@ function drawHud(st){
   // progress
   const pr=Math.max(0,Math.min(1,st/(endT-2.5))); g.fillStyle="#ffffff22"; g.fillRect(20,150,180,6); g.fillStyle="#ffd23f"; g.fillRect(20,150,180*pr,6);
   // combo + multiplier on the right of highway
-  const rx=cx+laneW*2.4+20; if(rx+120<W){
+  const rx=cx+laneW*(HALF+.4)+20; if(rx+120<W){
     g.textAlign="left"; const pz=1+streakPulse*.3;
     g.save(); g.translate(rx,hitY-120); g.scale(pz,pz); g.fillStyle=combo>=10?"#ffd23f":"#fff"; g.shadowColor=g.fillStyle; g.shadowBlur=18; g.font="bold 64px 'Trebuchet MS',sans-serif"; g.fillText(combo,0,0); g.font="bold 20px 'Trebuchet MS',sans-serif"; g.fillText("STREAK",0,26); g.restore();
     // multiplier ring
