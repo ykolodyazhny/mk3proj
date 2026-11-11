@@ -8,6 +8,13 @@ One HTML file, no install, no internet needed.
 
 (One-time setup for the repo owner: merge to `main`, then Settings → Pages → Source: **GitHub Actions**.)
 
+## BeatHero 🎸 (guitar-hero style game)
+Same MPK, same one-file/no-install setup: **https://ykolodyazhny.github.io/mk3proj/game.html** (or `./run.sh` and open `/game.html`; there's a link back to BeatBox in the corner).
+- Pick a song with pads 1–4 (4 songs, easy → wild). Gems fly down a neon synthwave highway; hit the matching pad as they reach the glowing line.
+- 4 lanes = pad columns (pads 1&5, 2&6, 3&7, 4&8). Piano keys work too (left → right across the keyboard), and so do computer keys **D F J K** / **1–4**.
+- Hit a gem and your pad plays the melody note over the backing band; miss and it goes quiet. Streaks build a x2/x3/x4 multiplier, x4 = rainbow fever mode.
+- Timing feels off? **[** / **]** shifts it 10 ms (remembered). **Esc** quits to the song list. Best stars per song are remembered.
+
 ## Run offline (Linux Mint)
 Plug in the MPK, then:
 
